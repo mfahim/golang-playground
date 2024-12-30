@@ -1,5 +1,9 @@
 package main
 
+/*
+import "fmt"
+
+
 import (
 	"bufio"
 	"encoding/csv"
@@ -9,12 +13,14 @@ import (
 	"time"
 )
 
+*/
 // Problem represents a single quiz question and its answer
 type Problem struct {
 	Question string
 	Answer   string
 }
 
+/*
 func main() {
 	// Open the CSV file
 	file, err := os.Open("problems.csv")
@@ -92,3 +98,4 @@ func parseProblems(records [][]string) []Problem {
 	}
 	return problems
 }
+*/
