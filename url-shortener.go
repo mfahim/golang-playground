@@ -53,6 +53,8 @@ func main() {
 	pathMap.AddPath("/github", "https://github.com")
 	pathMap.AddPath("/google", "https://google.com")
 	pathMap.AddPath("/stackoverflow", "https://stackoverflow.com")
+	pathMap.AddPath("/urlshort", "https://github.com/gophercises/urlshort")
+	pathMap.AddPath("/urlshort-final", "https://github.com/gophercises/urlshort/tree/solution")
 
 	// Create a handler using our map
 	handler := MapHandler(pathMap)
