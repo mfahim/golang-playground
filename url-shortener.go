@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 )
 
@@ -11,6 +13,13 @@ import (
 type URLMap struct {
 	paths map[string]string
 	mu    sync.RWMutex
+}
+type PathMap struct {
+	Mappings map[string]string `json:"mappings"`
+}
+type URLMapper struct {
+	pathMap PathMap
+	mu      sync.RWMutex
 }
 
 // MapHandler will map paths to their corresponding URLs and redirect when applicable
@@ -43,12 +52,46 @@ func (u *URLMap) AddPath(path, url string) {
 	u.paths[path] = url
 }
 
+// NewURLMapper creates a new URLMapper from JSON file
+func NewURLMapper(jsonFile string) (*URLMapper, error) {
+	mapper := &URLMapper{
+		pathMap: PathMap{
+			Mappings: make(map[string]string),
+		},
+	}
+
+	// Check if JSON file exists
+	if _, err := os.Stat(jsonFile); err == nil {
+		// Read and parse JSON file
+		data, err := os.Open(jsonFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading JSON file: %v", err)
+		}
+
+		var jsonData map[string]interface{}
+		decoder := json.NewDecoder(data)
+		err = decoder.Decode(&jsonData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode JSON: %w", err)
+		}
+	}
+
+	return mapper, nil
+}
+
 func main() {
+	const jsonFile = "urls.json"
+
+	// Initialize URL mapper from JSON
+	mapper, err := NewURLMapper(jsonFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Initialize our URL map
 	pathMap := &URLMap{
 		paths: make(map[string]string),
 	}
-
 	// Add some example path mappings
 	pathMap.AddPath("/github", "https://github.com")
 	pathMap.AddPath("/google", "https://google.com")
@@ -82,7 +125,25 @@ func main() {
 		pathMap.AddPath(path, url)
 		fmt.Fprintf(w, "Successfully mapped %s to %s", path, url)
 	})
+	// Handler to view all mappings
+	mux.HandleFunc("/mappings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
+		mapper.mu.RLock()
+		data, err := json.MarshalIndent(mapper.pathMap, "", "    ")
+		mapper.mu.RUnlock()
+
+		if err != nil {
+			http.Error(w, "Error retrieving mappings", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+	})
 	// Start the server
 	fmt.Println("Starting server on :8080")
 	fmt.Println("Example mappings:")

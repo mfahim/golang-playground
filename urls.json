@@ -1,0 +1,7 @@
+{
+    "mappings": {
+        "/github": "https://github.com",
+        "/google": "https://google.com",
+        "/stack": "https://stackoverflow.com"
+    }
+}
