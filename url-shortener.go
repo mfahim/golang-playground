@@ -6,107 +6,74 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync"
+	//"sync"
 )
 
 // URLMap stores our path mappings with thread-safe access
 type URLMap struct {
-	paths map[string]string
-	mu    sync.RWMutex
+	// paths map[string]string
+	// mu    sync.RWMutex
 }
-type PathMap struct {
-	Mappings map[string]string `json:"mappings"`
-}
-type URLMapper struct {
-	pathMap PathMap
-	mu      sync.RWMutex
+
+// YAMLPathMap represents the structure of the YAML file.
+type YAMLPathMap struct {
+	Paths map[string]string `yaml:"paths"`
 }
 
 // MapHandler will map paths to their corresponding URLs and redirect when applicable
-func MapHandler(pathMap *URLMap) http.HandlerFunc {
+func MapHandler(pathsToUrls map[string]string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Get the path from the request
 		path := r.URL.Path
-
-		// Check if we have a redirect for this path
-		pathMap.mu.RLock()
-		target, exists := pathMap.paths[path]
-		pathMap.mu.RUnlock()
-
-		if exists {
-			// If we have a mapping, redirect to the target URL
-			http.Redirect(w, r, target, http.StatusFound)
+		if dest, ok := pathsToUrls[path]; ok {
+			http.Redirect(w, r, dest, http.StatusFound)
 			return
 		}
-
-		// If we don't have a redirect, show a 404 page
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, "Page not found. Path: %s", path)
+		http.NotFound(w, r) // Use http.NotFound for a standard 404 response
 	}
 }
 
-// AddPath adds a new path mapping
-func (u *URLMap) AddPath(path, url string) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.paths[path] = url
-}
+// loadJSONFile reads a JSON file and returns a map of paths to URLs.
+func loadJSONFile(jsonFile string) (map[string]string, error) {
 
-// NewURLMapper creates a new URLMapper from JSON file
-func NewURLMapper(jsonFile string) (*URLMapper, error) {
-	mapper := &URLMapper{
-		pathMap: PathMap{
-			Mappings: make(map[string]string),
-		},
+	data, err := os.ReadFile(jsonFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JSON file: %w", err)
 	}
 
-	// Check if JSON file exists
-	if _, err := os.Stat(jsonFile); err == nil {
-		// Read and parse JSON file
-		data, err := os.Open(jsonFile)
-		if err != nil {
-			return nil, fmt.Errorf("error reading JSON file: %v", err)
-		}
-
-		var jsonData map[string]interface{}
-		decoder := json.NewDecoder(data)
-		err = decoder.Decode(&jsonData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode JSON: %w", err)
-		}
+	var pathMap map[string]string
+	if err := json.Unmarshal(data, &pathMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
 	}
 
-	return mapper, nil
+	return pathMap, nil
 }
 
 func main() {
 	const jsonFile = "urls.json"
 
-	// Initialize URL mapper from JSON
-	mapper, err := NewURLMapper(jsonFile)
+	// Load path mappings from the JSON file
+	pathsToUrls, err := loadJSONFile(jsonFile)
+
 	if err != nil {
-		log.Fatal(err)
+		// Handle error more gracefully
+		if !os.IsNotExist(err) {
+			log.Fatalf("Error loading JSON file: %v", err)
+		}
+		fmt.Println("urls.json not found, using default mappings.")
+		pathsToUrls = map[string]string{
+			"/github": "https://github.com",
+			"/google": "https://google.com",
+			// Add more default mappings here as needed
+		}
 	}
 
-	// Initialize our URL map
-	pathMap := &URLMap{
-		paths: make(map[string]string),
-	}
-	// Add some example path mappings
-	pathMap.AddPath("/github", "https://github.com")
-	pathMap.AddPath("/google", "https://google.com")
-	pathMap.AddPath("/stackoverflow", "https://stackoverflow.com")
-	pathMap.AddPath("/urlshort", "https://github.com/gophercises/urlshort")
-	pathMap.AddPath("/urlshort-final", "https://github.com/gophercises/urlshort/tree/solution")
+	// Create the default map handler
+	mapHandler := MapHandler(pathsToUrls)
 
-	// Create a handler using our map
-	handler := MapHandler(pathMap)
-
-	// Add routes
+	// Create a new ServeMux
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handler)
+	mux.Handle("/", mapHandler) //Use mapHandler instead of MapHandler
 
-	// Add an endpoint to create new mappings
 	mux.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -121,36 +88,28 @@ func main() {
 			return
 		}
 
-		// Add the new mapping
-		pathMap.AddPath(path, url)
-		fmt.Fprintf(w, "Successfully mapped %s to %s", path, url)
+		pathsToUrls[path] = url
+
+		w.WriteHeader(http.StatusCreated) // Return 201 Created
+		fmt.Fprintf(w, "Successfully mapped %s to %s\n", path, url)
 	})
-	// Handler to view all mappings
+
 	mux.HandleFunc("/mappings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		mapper.mu.RLock()
-		data, err := json.MarshalIndent(mapper.pathMap, "", "    ")
-		mapper.mu.RUnlock()
-
+		jsonData, err := json.MarshalIndent(pathsToUrls, "", "    ")
 		if err != nil {
-			http.Error(w, "Error retrieving mappings", http.StatusInternalServerError)
+			http.Error(w, "Error marshalling data", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
+		w.Write(jsonData)
 	})
-	// Start the server
-	fmt.Println("Starting server on :8080")
-	fmt.Println("Example mappings:")
-	fmt.Println("  http://localhost:8080/github -> https://github.com")
-	fmt.Println("  http://localhost:8080/google -> https://google.com")
-	fmt.Println("  http://localhost:8080/stackoverflow -> https://stackoverflow.com")
-	fmt.Println("\nTo add new mappings, use POST /add with path and url parameters")
 
+	fmt.Println("Starting server on :8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }
